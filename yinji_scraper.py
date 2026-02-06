@@ -7,13 +7,11 @@ organizes files, and generates an Excel index.
 from __future__ import annotations
 
 import argparse
-import os
 import re
-import sys
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Iterable, List, Optional, Tuple
+from typing import Iterable, List, Optional, Sequence, Tuple
 from urllib.parse import urljoin, urlparse
 
 import requests
@@ -44,7 +42,7 @@ def ensure_dir(path: Path) -> None:
 
 
 def request_page(url: str, timeout: int = 20) -> str:
-    resp = requests.get(url, timeout=timeout)
+    resp = requests.get(url, timeout=timeout, headers={"User-Agent": "Mozilla/5.0"})
     resp.raise_for_status()
     resp.encoding = resp.apparent_encoding
     return resp.text
@@ -72,7 +70,8 @@ def parse_article(url: str) -> Tuple[str, str, str, List[str]]:
         ],
     )
     if not title:
-        title = "unknown-title"
+        meta_title = soup.find("meta", property="og:title")
+        title = meta_title.get("content") if meta_title else "unknown-title"
 
     design_firm = parse_text(
         soup,
@@ -81,10 +80,12 @@ def parse_article(url: str) -> Tuple[str, str, str, List[str]]:
             ".design-company",
             ".designer",
             ".post-meta .company",
+            ".post-meta .author",
         ],
     )
     if not design_firm:
-        design_firm = "unknown-firm"
+        meta_author = soup.find("meta", attrs={"name": "author"})
+        design_firm = meta_author.get("content") if meta_author else "unknown-firm"
 
     category = parse_text(
         soup,
@@ -96,21 +97,30 @@ def parse_article(url: str) -> Tuple[str, str, str, List[str]]:
         ],
     )
     if not category:
-        category = "unknown-category"
+        meta_section = soup.find("meta", property="article:section")
+        category = meta_section.get("content") if meta_section else "unknown-category"
 
     image_urls: List[str] = []
     for img in soup.select("img"):
-        src = img.get("data-src") or img.get("data-original") or img.get("src")
+        src = (
+            img.get("data-src")
+            or img.get("data-original")
+            or img.get("data-lazy-src")
+            or img.get("src")
+        )
         if not src:
+            continue
+        if src.startswith("data:"):
             continue
         image_urls.append(urljoin(url, src))
 
-    return title, design_firm, category, image_urls
+    unique_images = list(dict.fromkeys(image_urls))
+    return title, design_firm, category, unique_images
 
 
 def download_image(url: str, output_dir: Path, index: int) -> Optional[Path]:
     try:
-        resp = requests.get(url, stream=True, timeout=20)
+        resp = requests.get(url, stream=True, timeout=20, headers={"User-Agent": "Mozilla/5.0"})
         resp.raise_for_status()
     except requests.RequestException:
         return None
@@ -177,9 +187,24 @@ def build_excel(records: List[ArticleData], output_path: Path) -> None:
     wb.save(output_path)
 
 
+def read_urls(urls: Sequence[str], url_file: Optional[Path]) -> List[str]:
+    collected = list(urls)
+    if url_file:
+        for line in url_file.read_text(encoding="utf-8").splitlines():
+            cleaned = line.strip()
+            if cleaned:
+                collected.append(cleaned)
+    return collected
+
+
 def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Scrape Yinji article pages.")
-    parser.add_argument("urls", nargs="+", help="Article page URL(s).")
+    parser.add_argument("urls", nargs="*", help="Article page URL(s).")
+    parser.add_argument(
+        "--url-file",
+        type=Path,
+        help="Text file containing one URL per line.",
+    )
     parser.add_argument(
         "--output",
         default="output",
@@ -198,8 +223,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     output_root = Path(args.output)
     ensure_dir(output_root)
 
+    url_list = read_urls(args.urls, args.url_file)
+    if not url_list:
+        raise SystemExit("No URLs provided. Use positional URLs or --url-file.")
+
     records: List[ArticleData] = []
-    for url in args.urls:
+    for url in url_list:
         record = scrape_article(url, output_root)
         records.append(record)
 
