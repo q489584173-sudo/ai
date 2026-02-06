@@ -198,22 +198,24 @@ def read_urls(urls: Sequence[str], url_file: Optional[Path]) -> List[str]:
 
 
 def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Scrape Yinji article pages.")
-    parser.add_argument("urls", nargs="*", help="Article page URL(s).")
+    parser = argparse.ArgumentParser(
+        description="抓取印际文章页面，下载图片并生成 Excel 索引表。"
+    )
+    parser.add_argument("urls", nargs="*", help="文章页面 URL（可填写多个）。")
     parser.add_argument(
         "--url-file",
         type=Path,
-        help="Text file containing one URL per line.",
+        help="包含 URL 的文本文件（每行一个）。",
     )
     parser.add_argument(
         "--output",
         default="output",
-        help="Root output directory for downloads.",
+        help="下载保存的根目录。",
     )
     parser.add_argument(
         "--excel",
         default=None,
-        help="Excel file path. Default: output/index_YYYYMMDD_HHMMSS.xlsx",
+        help="Excel 文件保存路径（默认：output/index_YYYYMMDD_HHMMSS.xlsx）。",
     )
     return parser.parse_args(argv)
 
@@ -225,7 +227,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     url_list = read_urls(args.urls, args.url_file)
     if not url_list:
-        raise SystemExit("No URLs provided. Use positional URLs or --url-file.")
+        raise SystemExit("未提供 URL，请在命令行输入或使用 --url-file。")
 
     records: List[ArticleData] = []
     for url in url_list:
@@ -236,7 +238,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     excel_path = Path(args.excel) if args.excel else output_root / f"index_{timestamp}.xlsx"
     build_excel(records, excel_path)
 
-    print(f"Saved Excel index to {excel_path}")
+    print(f"已保存 Excel 索引表：{excel_path}")
     return 0
 
 
